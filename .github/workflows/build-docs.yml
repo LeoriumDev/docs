@@ -16,36 +16,33 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 23
+          node-version: 20  # Changed from 23 to 20 as Node 23 might not be supported
 
-      - name: Read config.json
-        id: read-config
-        run: |
-          CONFIG=$(cat config.json)
-          echo "::set-output name=config::$CONFIG"
-
-      - name: Check if config.json is a valid json
+      - name: Check config.json exists or create default
         id: config-check
         run: |
-          if [ -z "$(cat config.json)" ]; then
-            echo "::set-output name=has_config::false"
+          if [ ! -f "config.json" ]; then
+            echo "Config file not found, creating empty array"
+            echo "[]" > config.json
+            echo "has_config=false" >> $GITHUB_ENV
           else
-            echo "::set-output name=has_config::true"
+            echo "has_config=true" >> $GITHUB_ENV
           fi
 
       - name: Build and Copy Documentation
-        if: steps.config-check.outputs.has_config == 'true'
+        if: env.has_config == 'true'
         run: |
-          CONFIG=$(echo '${{ steps.read-config.outputs.config }}' | jq -c .)
-          echo "Config after jq -c: $CONFIG"
+          CONFIG=$(cat config.json)
+          echo "Config content: $CONFIG"
 
-          # Parse the JSON config file
-          REPOS=$(echo "$CONFIG" | jq -r '.[]')
-
-          echo "Repos after jq -r '.[]': $REPOS"
+          # Check if config is empty array
+          if [ "$CONFIG" = "[]" ]; then
+            echo "Config is empty, nothing to build"
+            exit 0
+          fi
 
           # Iterate through the repositories
-          for REPO in $(echo "$REPOS"); do
+          echo "$CONFIG" | jq -c '.[]' | while read -r REPO; do
             # Extract the values from the JSON object
             NAME=$(echo "$REPO" | jq -r '.name')
             REPOSITORY=$(echo "$REPO" | jq -r '.repository')
