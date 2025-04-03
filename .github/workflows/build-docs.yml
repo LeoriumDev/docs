@@ -1,0 +1,68 @@
+name: Build docs
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 23
+
+      - name: Read config.json
+        id: read-config
+        run: echo "::set-output name=config::$(cat config.json)"
+
+      - name: Build and Copy Documentation
+        run: |
+          CONFIG=$(echo '${{ steps.read-config.outputs.config }}' | jq -c .)
+          echo "$CONFIG"
+
+          # Parse the JSON config file
+          REPOS=$(echo "$CONFIG" | jq -r '.[]')
+
+          # Iterate through the repositories
+          for REPO in $(echo "$REPOS"); do
+            # Extract the values from the JSON object
+            NAME=$(echo "$REPO" | jq -r '.name')
+            REPOSITORY=$(echo "$REPO" | jq -r '.repository')
+            DOCS_PATH=$(echo "$REPO" | jq -r '.docsPath')
+            OUTPUT_PATH=$(echo "$REPO" | jq -r '.outputPath')
+
+            echo "Building documentation for $NAME ($REPOSITORY)"
+
+            # Checkout the repository
+            git clone --depth 1 "https://github.com/$REPOSITORY" "$NAME"
+
+            # Build the documentation
+            cd "$NAME/$DOCS_PATH"
+            npm install
+            npm run build
+            cd ../../..
+
+            # Create the output directory
+            mkdir -p "$OUTPUT_PATH"
+
+            # Copy the built documentation to the output directory
+            cp -r "$NAME/$DOCS_PATH/build/"* "$OUTPUT_PATH/"
+
+            # Clean up the checked-out repository
+            rm -rf "$NAME"
+          done
+
+      - name: Commit and Push to origin
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add .
+          git commit -m "Update documentation" -a || echo "No changes to commit"
+          git push origin main
