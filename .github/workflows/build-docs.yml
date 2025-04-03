@@ -20,15 +20,31 @@ jobs:
 
       - name: Read config.json
         id: read-config
-        run: echo "::set-output name=config::$(cat config.json)"
+        run: |
+          CONFIG=$(cat config.json)
+          echo "::set-output name=config::$CONFIG"
+          echo "Raw config output: $CONFIG"
+          echo "Length of config: ${#CONFIG}" # Added to get config length
+          if [ -z "$CONFIG" ]; then # Check if config is empty
+            echo "config.json is EMPTY!"
+            exit 1 # Exit the workflow
+          fi
+          jq --version
+
+      - name: Check if config.json is a valid json
+        run: |
+          CONFIG=$(cat config.json)
+          echo "$CONFIG" | jq .
 
       - name: Build and Copy Documentation
         run: |
           CONFIG=$(echo '${{ steps.read-config.outputs.config }}' | jq -c .)
-          echo "$CONFIG"
+          echo "Config after jq -c: $CONFIG"
 
           # Parse the JSON config file
           REPOS=$(echo "$CONFIG" | jq -r '.[]')
+
+          echo "Repos after jq -r '.[]': $REPOS"
 
           # Iterate through the repositories
           for REPO in $(echo "$REPOS"); do
