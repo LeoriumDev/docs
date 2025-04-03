@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20  # Changed from 23 to 20 as Node 23 might not be supported
+          node-version: 20
 
       - name: Check config.json exists or create default
         id: config-check
@@ -54,17 +54,62 @@ jobs:
             # Checkout the repository
             git clone --depth 1 "https://github.com/$REPOSITORY" "$NAME"
 
+            # Debug: List directory structure before build
+            echo "Directory structure before build:"
+            find "$NAME" -type d | sort
+
             # Build the documentation
             cd "$NAME/$DOCS_PATH"
             npm install
             npm run build
             cd ../../..
 
+            # Debug: List directory structure after build
+            echo "Directory structure after build:"
+            find "$NAME" -type d | sort
+
+            # Debug: Check if build directory exists
+            BUILD_DIR="$NAME/$DOCS_PATH/build"
+            if [ ! -d "$BUILD_DIR" ]; then
+              echo "Warning: Build directory $BUILD_DIR does not exist!"
+              
+              # Try to find where the build output might be
+              echo "Searching for possible build directories:"
+              find "$NAME" -name "build" -type d
+              find "$NAME" -name "dist" -type d
+              find "$NAME" -name "out" -type d
+              
+              # Check package.json for build script
+              echo "Checking build script in package.json:"
+              cat "$NAME/$DOCS_PATH/package.json" | grep -A 5 '"scripts"'
+              
+              # Try to continue with a best guess if we can find a build directory
+              POSSIBLE_BUILD=$(find "$NAME" -name "build" -type d | head -n 1)
+              if [ -n "$POSSIBLE_BUILD" ]; then
+                echo "Found possible build directory: $POSSIBLE_BUILD"
+                BUILD_DIR="$POSSIBLE_BUILD"
+              else
+                POSSIBLE_BUILD=$(find "$NAME" -name "dist" -type d | head -n 1)
+                if [ -n "$POSSIBLE_BUILD" ]; then
+                  echo "Found possible dist directory: $POSSIBLE_BUILD"
+                  BUILD_DIR="$POSSIBLE_BUILD"
+                else
+                  echo "Error: Could not find any build output for $NAME"
+                  continue
+                fi
+              fi
+            fi
+
             # Create the output directory
             mkdir -p "$OUTPUT_PATH"
 
             # Copy the built documentation to the output directory
-            cp -r "$NAME/$DOCS_PATH/build/"* "$OUTPUT_PATH/"
+            echo "Copying from $BUILD_DIR/* to $OUTPUT_PATH/"
+            if [ -d "$BUILD_DIR" ] && [ "$(ls -A "$BUILD_DIR")" ]; then
+              cp -r "$BUILD_DIR/"* "$OUTPUT_PATH/" || echo "Warning: Copy failed, but continuing"
+            else
+              echo "Error: No files found in build directory $BUILD_DIR"
+            fi
 
             # Clean up the checked-out repository
             rm -rf "$NAME"
