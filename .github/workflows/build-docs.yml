@@ -27,6 +27,7 @@ jobs:
             echo "has_config=false" >> $GITHUB_ENV
           else
             echo "has_config=true" >> $GITHUB_ENV
+            cat config.json
           fi
 
       - name: Build and Copy Documentation
@@ -41,6 +42,9 @@ jobs:
             exit 0
           fi
 
+          # Create a flag to track if any build succeeded
+          BUILD_SUCCESS=false
+
           # Iterate through the repositories
           echo "$CONFIG" | jq -c '.[]' | while read -r REPO; do
             # Extract the values from the JSON object
@@ -49,71 +53,115 @@ jobs:
             DOCS_PATH=$(echo "$REPO" | jq -r '.docsPath')
             OUTPUT_PATH=$(echo "$REPO" | jq -r '.outputPath')
 
-            echo "Building documentation for $NAME ($REPOSITORY)"
+            echo "===== Processing repository: $NAME ($REPOSITORY) ====="
+            
+            # Check if repository exists
+            if ! curl --output /dev/null --silent --head --fail "https://github.com/$REPOSITORY"; then
+              echo "Error: Repository $REPOSITORY does not exist or is not accessible"
+              continue
+            fi
 
-            # Checkout the repository
-            git clone --depth 1 "https://github.com/$REPOSITORY" "$NAME"
+            # Checkout the repository with error handling
+            echo "Cloning repository..."
+            if ! git clone --depth 1 "https://github.com/$REPOSITORY" "$NAME"; then
+              echo "Error: Failed to clone repository $REPOSITORY"
+              continue
+            fi
 
-            # Debug: List directory structure before build
-            echo "Directory structure before build:"
-            find "$NAME" -type d | sort
+            # Check if the repository was cloned successfully
+            if [ ! -d "$NAME" ]; then
+              echo "Error: Directory $NAME does not exist after git clone"
+              continue
+            fi
 
-            # Build the documentation
+            # List contents of the cloned repository
+            echo "Contents of cloned repository:"
+            ls -la "$NAME"
+
+            # Check if docs path exists
+            if [ ! -d "$NAME/$DOCS_PATH" ]; then
+              echo "Error: Docs path $NAME/$DOCS_PATH does not exist"
+              
+              # Try to find possible docs directories
+              echo "Searching for possible docs directories:"
+              find "$NAME" -type d -name "docs" -o -name "documentation" -o -name "doc"
+              
+              # Continue to next repository
+              continue
+            fi
+
+            # Check if package.json exists in docs path
+            if [ ! -f "$NAME/$DOCS_PATH/package.json" ]; then
+              echo "Error: package.json not found in $NAME/$DOCS_PATH"
+              continue
+            fi
+
+            # Show package.json content
+            echo "package.json content:"
+            cat "$NAME/$DOCS_PATH/package.json"
+
+            # Try to build the documentation
+            echo "Building documentation..."
             cd "$NAME/$DOCS_PATH"
-            npm install
-            npm run build
+            
+            # Install dependencies with error handling
+            if ! npm install; then
+              echo "Error: npm install failed"
+              cd ../../..
+              continue
+            fi
+            
+            # Run build with error handling
+            if ! npm run build; then
+              echo "Error: npm run build failed"
+              cd ../../..
+              continue
+            fi
+            
             cd ../../..
 
-            # Debug: List directory structure after build
-            echo "Directory structure after build:"
-            find "$NAME" -type d | sort
-
-            # Debug: Check if build directory exists
-            BUILD_DIR="$NAME/$DOCS_PATH/build"
-            if [ ! -d "$BUILD_DIR" ]; then
-              echo "Warning: Build directory $BUILD_DIR does not exist!"
-              
-              # Try to find where the build output might be
-              echo "Searching for possible build directories:"
-              find "$NAME" -name "build" -type d
-              find "$NAME" -name "dist" -type d
-              find "$NAME" -name "out" -type d
-              
-              # Check package.json for build script
-              echo "Checking build script in package.json:"
-              cat "$NAME/$DOCS_PATH/package.json" | grep -A 5 '"scripts"'
-              
-              # Try to continue with a best guess if we can find a build directory
-              POSSIBLE_BUILD=$(find "$NAME" -name "build" -type d | head -n 1)
-              if [ -n "$POSSIBLE_BUILD" ]; then
-                echo "Found possible build directory: $POSSIBLE_BUILD"
-                BUILD_DIR="$POSSIBLE_BUILD"
-              else
-                POSSIBLE_BUILD=$(find "$NAME" -name "dist" -type d | head -n 1)
-                if [ -n "$POSSIBLE_BUILD" ]; then
-                  echo "Found possible dist directory: $POSSIBLE_BUILD"
-                  BUILD_DIR="$POSSIBLE_BUILD"
-                else
-                  echo "Error: Could not find any build output for $NAME"
-                  continue
-                fi
-              fi
+            # Find all possible build directories
+            echo "Searching for build output:"
+            BUILD_DIRS=$(find "$NAME" -type d \( -name "build" -o -name "dist" -o -name "out" -o -name "_site" -o -name "public" \))
+            
+            if [ -z "$BUILD_DIRS" ]; then
+              echo "Error: No build output found for $NAME"
+              continue
             fi
+            
+            echo "Found build directories:"
+            echo "$BUILD_DIRS"
 
             # Create the output directory
             mkdir -p "$OUTPUT_PATH"
 
-            # Copy the built documentation to the output directory
-            echo "Copying from $BUILD_DIR/* to $OUTPUT_PATH/"
-            if [ -d "$BUILD_DIR" ] && [ "$(ls -A "$BUILD_DIR")" ]; then
-              cp -r "$BUILD_DIR/"* "$OUTPUT_PATH/" || echo "Warning: Copy failed, but continuing"
-            else
-              echo "Error: No files found in build directory $BUILD_DIR"
+            # Try to copy from each potential build directory
+            COPY_SUCCESS=false
+            for BUILD_DIR in $BUILD_DIRS; do
+              echo "Checking build directory: $BUILD_DIR"
+              if [ -d "$BUILD_DIR" ] && [ "$(ls -A "$BUILD_DIR" 2>/dev/null)" ]; then
+                echo "Copying from $BUILD_DIR/* to $OUTPUT_PATH/"
+                cp -r "$BUILD_DIR/"* "$OUTPUT_PATH/" && COPY_SUCCESS=true && BUILD_SUCCESS=true
+                echo "Copy completed successfully"
+                break
+              else
+                echo "Directory $BUILD_DIR is empty or doesn't contain files"
+              fi
+            done
+
+            if [ "$COPY_SUCCESS" = false ]; then
+              echo "Warning: Failed to copy build output for $NAME"
             fi
 
             # Clean up the checked-out repository
             rm -rf "$NAME"
           done
+
+          # Exit with error if no builds succeeded
+          if [ "$BUILD_SUCCESS" = false ]; then
+            echo "Error: No documentation was successfully built and copied"
+            exit 1
+          fi
 
       - name: Commit and Push to origin
         run: |
