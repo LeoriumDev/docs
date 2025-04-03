@@ -1,8 +1,8 @@
 [
     {
-      "name": "Serdec",
+      "name": "serdec",
       "repository": "LeoriumDev/serdec",
-      "docsPath": "serdec/docs",
+      "docsPath": "/docs",
       "outputPath": "serdec"
     }
 ]
