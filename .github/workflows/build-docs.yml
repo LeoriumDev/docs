@@ -46,18 +46,25 @@ jobs:
             exit 0
           fi
 
-          # Create a flag to track if any build succeeded
-          BUILD_SUCCESS=false
-
-          # Iterate through the repositories
-          echo "$CONFIG" | jq -c '.[]' | while read -r REPO; do
+          # Create a success flag file to track build success across subshells
+          SUCCESS_FLAG_FILE=$(mktemp)
+          echo "false" > "$SUCCESS_FLAG_FILE"
+          
+          # Get number of repositories
+          REPO_COUNT=$(echo "$CONFIG" | jq length)
+          echo "Processing $REPO_COUNT repositories"
+          
+          # Use jq to extract each repository info without a pipe
+          for i in $(seq 0 $(($REPO_COUNT - 1))); do
+            REPO=$(echo "$CONFIG" | jq -c ".[$i]")
+            
             # Extract the values from the JSON object
             NAME=$(echo "$REPO" | jq -r '.name')
             REPOSITORY=$(echo "$REPO" | jq -r '.repository')
             DOCS_PATH=$(echo "$REPO" | jq -r '.docsPath')
             OUTPUT_PATH=$(echo "$REPO" | jq -r '.outputPath')
 
-            echo "===== Processing repository: $NAME ($REPOSITORY) ====="
+            echo "===== Processing repository $((i+1))/$REPO_COUNT: $NAME ($REPOSITORY) ====="
             
             # Use absolute paths
             REPO_DIR="$WORKSPACE_DIR/$NAME"
@@ -133,7 +140,7 @@ jobs:
               
               if [ $? -eq 0 ]; then
                 echo "Copy completed successfully"
-                BUILD_SUCCESS=true
+                echo "true" > "$SUCCESS_FLAG_FILE"
               else
                 echo "Error: Failed to copy files"
               fi
@@ -159,7 +166,7 @@ jobs:
                     
                     if [ $? -eq 0 ]; then
                       echo "Copy completed successfully"
-                      BUILD_SUCCESS=true
+                      echo "true" > "$SUCCESS_FLAG_FILE"
                       break
                     else
                       echo "Error: Failed to copy files from $DIR"
@@ -180,10 +187,15 @@ jobs:
             rm -rf "$REPO_DIR"
           done
 
-          # Exit with error if no builds succeeded
-          if [ "$BUILD_SUCCESS" = false ]; then
+          # Check if any build succeeded using the flag file
+          BUILD_SUCCESS=$(cat "$SUCCESS_FLAG_FILE")
+          rm "$SUCCESS_FLAG_FILE"  # Clean up the temporary file
+          
+          if [ "$BUILD_SUCCESS" != "true" ]; then
             echo "Error: No documentation was successfully built and copied"
             exit 1
+          else
+            echo "At least one documentation build succeeded"
           fi
 
       - name: Commit and Push to origin
