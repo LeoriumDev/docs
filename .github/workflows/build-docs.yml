@@ -23,20 +23,18 @@ jobs:
         run: |
           CONFIG=$(cat config.json)
           echo "::set-output name=config::$CONFIG"
-          echo "Raw config output: $CONFIG"
-          echo "Length of config: ${#CONFIG}" # Added to get config length
-          if [ -z "$CONFIG" ]; then # Check if config is empty
-            echo "config.json is EMPTY!"
-            exit 1 # Exit the workflow
-          fi
-          jq --version
 
       - name: Check if config.json is a valid json
+        id: config-check
         run: |
-          CONFIG=$(cat config.json)
-          echo "$CONFIG" | jq .
+          if [ -z "$(cat config.json)" ]; then
+            echo "::set-output name=has_config::false"
+          else
+            echo "::set-output name=has_config::true"
+          fi
 
       - name: Build and Copy Documentation
+        if: steps.config-check.outputs.has_config == 'true'
         run: |
           CONFIG=$(echo '${{ steps.read-config.outputs.config }}' | jq -c .)
           echo "Config after jq -c: $CONFIG"
