@@ -3,6 +3,6 @@
       "name": "serdec",
       "repository": "LeoriumDev/serdec",
       "docsPath": "docs",
-      "outputPath": "docs/serdec"
+      "outputPath": "serdec"
     }
 ]
